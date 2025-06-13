@@ -90,6 +90,7 @@ func TestMssqlToolEndpoints(t *testing.T) {
 	// create table name with UUID
 	tableNameParam := "param_table_" + strings.ReplaceAll(uuid.New().String(), "-", "")
 	tableNameAuth := "auth_table_" + strings.ReplaceAll(uuid.New().String(), "-", "")
+	tableNameTemplateParam := "template_param_table_" + strings.ReplaceAll(uuid.New().String(), "-", "")
 
 	// set up data for param tool
 	create_statement1, insert_statement1, tool_statement1, params1 := tests.GetMssqlParamToolInfo(tableNameParam)
@@ -97,13 +98,15 @@ func TestMssqlToolEndpoints(t *testing.T) {
 	defer teardownTable1(t)
 
 	// set up data for auth tool
-	create_statement2, insert_statement2, tool_statement2, params2 := tests.GetMssqlLAuthToolInfo(tableNameAuth)
+	create_statement2, insert_statement2, tool_statement2, params2 := tests.GetMssqlAuthToolInfo(tableNameAuth)
 	teardownTable2 := tests.SetupMsSQLTable(t, ctx, pool, create_statement2, insert_statement2, tableNameAuth, params2)
 	defer teardownTable2(t)
 
 	// Write config into a file and pass it to command
 	toolsFile := tests.GetToolsConfig(sourceConfig, MSSQL_TOOL_KIND, tool_statement1, tool_statement2)
 	toolsFile = tests.AddMssqlExecuteSqlConfig(t, toolsFile)
+	tmplSelectCombined, tmplSelectFilterCombined := tests.GetMssqlTmplToolStatement()
+	toolsFile = tests.AddTemplateParamConfig(t, toolsFile, MSSQL_TOOL_KIND, tmplSelectCombined, tmplSelectFilterCombined)
 
 	cmd, cleanup, err := tests.StartCmd(ctx, toolsFile, args...)
 	if err != nil {
@@ -122,8 +125,9 @@ func TestMssqlToolEndpoints(t *testing.T) {
 	tests.RunToolGetTest(t)
 
 	select1Want, failInvocationWant, createTableStatement := tests.GetMssqlWants()
-	invokeParamWant, mcpInvokeParamWant := tests.GetNonSpannerInvokeParamWant()
+	invokeParamWant, mcpInvokeParamWant, tmplSelectAllWant, tmplSelect1Want := tests.GetNonSpannerInvokeParamWant()
 	tests.RunToolInvokeTest(t, select1Want, invokeParamWant)
 	tests.RunExecuteSqlToolInvokeTest(t, createTableStatement, select1Want)
 	tests.RunMCPToolCallMethod(t, mcpInvokeParamWant, failInvocationWant)
+	tests.RunToolInvokeWithTemplateParameters(t, tableNameTemplateParam, tmplSelectAllWant, tmplSelect1Want, "", "", false, false)
 }
