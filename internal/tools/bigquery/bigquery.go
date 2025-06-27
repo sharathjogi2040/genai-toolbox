@@ -53,13 +53,14 @@ var _ compatibleSource = &bigqueryds.Source{}
 var compatibleSources = [...]string{bigqueryds.SourceKind}
 
 type Config struct {
-	Name         string           `yaml:"name" validate:"required"`
-	Kind         string           `yaml:"kind" validate:"required"`
-	Source       string           `yaml:"source" validate:"required"`
-	Description  string           `yaml:"description" validate:"required"`
-	Statement    string           `yaml:"statement" validate:"required"`
-	AuthRequired []string         `yaml:"authRequired"`
-	Parameters   tools.Parameters `yaml:"parameters"`
+	Name               string           `yaml:"name" validate:"required"`
+	Kind               string           `yaml:"kind" validate:"required"`
+	Source             string           `yaml:"source" validate:"required"`
+	Description        string           `yaml:"description" validate:"required"`
+	Statement          string           `yaml:"statement" validate:"required"`
+	AuthRequired       []string         `yaml:"authRequired"`
+	Parameters         tools.Parameters `yaml:"parameters"`
+	TemplateParameters tools.Parameters `yaml:"templateParameters"`
 }
 
 // validate interface
@@ -82,22 +83,26 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 		return nil, fmt.Errorf("invalid source for %q tool: source kind must be one of %q", kind, compatibleSources)
 	}
 
+	allParameters, paramManifest, paramMcpManifest := tools.ProcessParameters(cfg.TemplateParameters, cfg.Parameters)
+
 	mcpManifest := tools.McpManifest{
 		Name:        cfg.Name,
 		Description: cfg.Description,
-		InputSchema: cfg.Parameters.McpManifest(),
+		InputSchema: paramMcpManifest,
 	}
 
 	// finish tool setup
 	t := Tool{
-		Name:         cfg.Name,
-		Kind:         kind,
-		Parameters:   cfg.Parameters,
-		Statement:    cfg.Statement,
-		AuthRequired: cfg.AuthRequired,
-		Client:       s.BigQueryClient(),
-		manifest:     tools.Manifest{Description: cfg.Description, Parameters: cfg.Parameters.Manifest(), AuthRequired: cfg.AuthRequired},
-		mcpManifest:  mcpManifest,
+		Name:               cfg.Name,
+		Kind:               kind,
+		Parameters:         cfg.Parameters,
+		TemplateParameters: cfg.TemplateParameters,
+		AllParams:          allParameters,
+		Statement:          cfg.Statement,
+		AuthRequired:       cfg.AuthRequired,
+		Client:             s.BigQueryClient(),
+		manifest:           tools.Manifest{Description: cfg.Description, Parameters: paramManifest, AuthRequired: cfg.AuthRequired},
+		mcpManifest:        mcpManifest,
 	}
 	return t, nil
 }
@@ -106,10 +111,12 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 var _ tools.Tool = Tool{}
 
 type Tool struct {
-	Name         string           `yaml:"name"`
-	Kind         string           `yaml:"kind"`
-	AuthRequired []string         `yaml:"authRequired"`
-	Parameters   tools.Parameters `yaml:"parameters"`
+	Name               string           `yaml:"name"`
+	Kind               string           `yaml:"kind"`
+	AuthRequired       []string         `yaml:"authRequired"`
+	Parameters         tools.Parameters `yaml:"parameters"`
+	TemplateParameters tools.Parameters `yaml:"templateParameters"`
+	AllParams          tools.Parameters `yaml:"allParams"`
 
 	Client      *bigqueryapi.Client
 	Statement   string
@@ -119,22 +126,42 @@ type Tool struct {
 
 func (t Tool) Invoke(ctx context.Context, params tools.ParamValues) ([]any, error) {
 	namedArgs := make([]bigqueryapi.QueryParameter, 0, len(params))
-	paramsMap := params.AsReversedMap()
-	for _, v := range params.AsSlice() {
-		paramName := paramsMap[v]
-		if strings.Contains(t.Statement, "@"+paramName) {
+	paramsMap := params.AsMap()
+	newStatement, err := tools.ResolveTemplateParams(t.TemplateParameters, t.Statement, paramsMap)
+	if err != nil {
+		return nil, fmt.Errorf("unable to extract template params %w", err)
+	}
+
+	for _, p := range t.Parameters {
+		name := p.GetName()
+		value := paramsMap[name]
+
+		// BigQuery's QueryParameter only accepts typed slices as input
+		// This checks if the param is an array.
+		// If yes, convert []any to typed slice (e.g []string, []int)
+		switch arrayParam := value.(type) {
+		case []any:
+			var err error
+			itemType := p.McpManifest().Items.Type
+			value, err = convertAnySliceToTyped(arrayParam, itemType, name)
+			if err != nil {
+				return nil, fmt.Errorf("unable to convert []any to typed slice: %w", err)
+			}
+		}
+
+		if strings.Contains(t.Statement, "@"+name) {
 			namedArgs = append(namedArgs, bigqueryapi.QueryParameter{
-				Name:  paramName,
-				Value: v,
+				Name:  name,
+				Value: value,
 			})
 		} else {
 			namedArgs = append(namedArgs, bigqueryapi.QueryParameter{
-				Value: v,
+				Value: value,
 			})
 		}
 	}
 
-	query := t.Client.Query(t.Statement)
+	query := t.Client.Query(newStatement)
 	query.Parameters = namedArgs
 	query.Location = t.Client.Location
 
@@ -164,7 +191,7 @@ func (t Tool) Invoke(ctx context.Context, params tools.ParamValues) ([]any, erro
 }
 
 func (t Tool) ParseParams(data map[string]any, claims map[string]map[string]any) (tools.ParamValues, error) {
-	return tools.ParseParams(t.Parameters, data, claims)
+	return tools.ParseParams(t.AllParams, data, claims)
 }
 
 func (t Tool) Manifest() tools.Manifest {
@@ -177,4 +204,48 @@ func (t Tool) McpManifest() tools.McpManifest {
 
 func (t Tool) Authorized(verifiedAuthServices []string) bool {
 	return tools.IsAuthorized(t.AuthRequired, verifiedAuthServices)
+}
+
+func convertAnySliceToTyped(s []any, itemType, paramName string) (any, error) {
+	var typedSlice any
+	switch itemType {
+	case "string":
+		typedSlice := make([]string, len(s))
+		for j, item := range s {
+			if s, ok := item.(string); ok {
+				typedSlice[j] = s
+			} else {
+				return nil, fmt.Errorf("parameter '%s': expected item at index %d to be string, got %T", paramName, j, item)
+			}
+		}
+	case "integer":
+		typedSlice := make([]int64, len(s))
+		for j, item := range s {
+			i, ok := item.(int)
+			if !ok {
+				return nil, fmt.Errorf("parameter '%s': expected item at index %d to be integer, got %T", paramName, j, item)
+			}
+			typedSlice[j] = int64(i)
+		}
+	case "float":
+		typedSlice := make([]float64, len(s))
+		for j, item := range s {
+			if f, ok := item.(float64); ok {
+				typedSlice[j] = f
+			} else {
+				return nil, fmt.Errorf("parameter '%s': expected item at index %d to be float, got %T", paramName, j, item)
+			}
+		}
+	case "boolean":
+		typedSlice := make([]bool, len(s))
+		for j, item := range s {
+			if b, ok := item.(bool); ok {
+				typedSlice[j] = b
+			} else {
+				return nil, fmt.Errorf("parameter '%s': expected item at index %d to be boolean, got %T", paramName, j, item)
+			}
+		}
+
+	}
+	return typedSlice, nil
 }
