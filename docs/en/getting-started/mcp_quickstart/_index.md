@@ -105,7 +105,7 @@ In this section, we will download Toolbox, configure our tools in a
     <!-- {x-release-please-start-version} -->
     ```bash
     export OS="linux/amd64" # one of linux/amd64, darwin/arm64, darwin/amd64, or windows/amd64
-    curl -O https://storage.googleapis.com/genai-toolbox/v0.6.0/$OS/toolbox
+    curl -O https://storage.googleapis.com/genai-toolbox/v0.8.0/$OS/toolbox
     ```
     <!-- {x-release-please-end} -->
 
@@ -199,7 +199,8 @@ In this section, we will download Toolbox, configure our tools in a
         - cancel-hotel
     ```
 
-    For more info on tools, check out the [Tools](../../resources/tools/_index.md) section.
+    For more info on tools, check out the
+    [Tools](../../resources/tools/_index.md) section.
 
 1. Run the Toolbox server, pointing to the `tools.yaml` file created earlier:
 

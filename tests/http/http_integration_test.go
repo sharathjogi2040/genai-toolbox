@@ -33,8 +33,8 @@ import (
 )
 
 var (
-	HTTP_SOURCE_KIND = "http"
-	HTTP_TOOL_KIND   = "http"
+	HttpSourceKind = "http"
+	HttpToolKind   = "http"
 )
 
 func getHTTPSourceConfig(t *testing.T) map[string]any {
@@ -44,7 +44,7 @@ func getHTTPSourceConfig(t *testing.T) map[string]any {
 	}
 	idToken = "Bearer " + idToken
 	return map[string]any{
-		"kind":    HTTP_SOURCE_KIND,
+		"kind":    HttpSourceKind,
 		"headers": map[string]string{"Authorization": idToken},
 	}
 }
@@ -245,7 +245,7 @@ func TestHttpToolEndpoints(t *testing.T) {
 
 	var args []string
 
-	toolsFile := getHTTPToolsConfig(sourceConfig, HTTP_TOOL_KIND)
+	toolsFile := getHTTPToolsConfig(sourceConfig, HttpToolKind)
 	cmd, cleanup, err := tests.StartCmd(ctx, toolsFile, args...)
 	if err != nil {
 		t.Fatalf("command initialization returned an error: %s", err)
@@ -282,7 +282,7 @@ func runAdvancedHTTPInvokeTest(t *testing.T) {
 			name:          "invoke my-advanced-tool",
 			api:           "http://127.0.0.1:5000/api/tool/my-advanced-tool/invoke",
 			requestHeader: map[string]string{},
-			requestBody:   bytes.NewBuffer([]byte(`{"animalArray": ["rabbit", "ostrich", "whale"], "id": 3, "country": "US", "X-Other-Header": "test"}`)),
+			requestBody:   bytes.NewBuffer([]byte(`{"animalArray": ["rabbit", "ostrich", "whale"], "id": 3, "path": "tool3", "country": "US", "X-Other-Header": "test"}`)),
 			want:          `["Hello","World"]`,
 			isErr:         false,
 		},
@@ -290,7 +290,7 @@ func runAdvancedHTTPInvokeTest(t *testing.T) {
 			name:          "invoke my-advanced-tool with wrong params",
 			api:           "http://127.0.0.1:5000/api/tool/my-advanced-tool/invoke",
 			requestHeader: map[string]string{},
-			requestBody:   bytes.NewBuffer([]byte(`{"animalArray": ["rabbit", "ostrich", "whale"], "id": 4, "country": "US", "X-Other-Header": "test"}`)),
+			requestBody:   bytes.NewBuffer([]byte(`{"animalArray": ["rabbit", "ostrich", "whale"], "id": 4, "path": "tool3", "country": "US", "X-Other-Header": "test"}`)),
 			isErr:         true,
 		},
 	}
@@ -408,10 +408,15 @@ func getHTTPToolsConfig(sourceConfig map[string]any, toolKind string) map[string
 				"kind":        toolKind,
 				"source":      "other-instance",
 				"method":      "get",
-				"path":        "/tool3?id=2",
+				"path":        "/{{.path}}?id=2",
 				"description": "some description",
 				"headers": map[string]string{
 					"X-Custom-Header": "example",
+				},
+				"pathParams": []tools.Parameter{
+					&tools.StringParameter{
+						CommonParameter: tools.CommonParameter{Name: "path", Type: "string", Desc: "path param"},
+					},
 				},
 				"queryParams": []tools.Parameter{
 					tools.NewIntParameter("id", "user ID"), tools.NewStringParameter("country", "country")},

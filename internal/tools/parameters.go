@@ -62,15 +62,6 @@ func (p ParamValues) AsMap() map[string]interface{} {
 	return params
 }
 
-// AsReversedMap returns a map of ParamValue's values to names.
-func (p ParamValues) AsReversedMap() map[any]string {
-	params := make(map[any]string)
-	for _, p := range p {
-		params[p.Value] = p.Name
-	}
-	return params
-}
-
 // AsMapByOrderedKeys returns a map of a key's position to it's value, as necessary for Spanner PSQL.
 // Example { $1 -> "value1", $2 -> "value2" }
 func (p ParamValues) AsMapByOrderedKeys() map[string]interface{} {
@@ -130,7 +121,10 @@ func ParseParams(ps Parameters, data map[string]any, claimsMap map[string]map[st
 			var ok bool
 			v, ok = data[name]
 			if !ok {
-				return nil, fmt.Errorf("parameter %q is required", name)
+				v = p.GetDefault()
+				if v == nil {
+					return nil, fmt.Errorf("parameter %q is required", name)
+				}
 			}
 		} else {
 			// parse authenticated parameter
@@ -253,6 +247,7 @@ type Parameter interface {
 	// but this is done to differentiate it from the fields in CommonParameter.
 	GetName() string
 	GetType() string
+	GetDefault() any
 	GetAuthServices() []ParamAuthService
 	Parse(any) (any, error)
 	Manifest() ParameterManifest
@@ -382,8 +377,10 @@ func (ps Parameters) McpManifest() McpToolsSchema {
 	for _, p := range ps {
 		name := p.GetName()
 		properties[name] = p.McpManifest()
-		// all parameters are added to the required field
-		required = append(required, name)
+		// parameters that doesn't have a default value are added to the required field
+		if p.GetDefault() == nil {
+			required = append(required, name)
+		}
 	}
 
 	return McpToolsSchema{
@@ -397,6 +394,7 @@ func (ps Parameters) McpManifest() McpToolsSchema {
 type ParameterManifest struct {
 	Name         string             `json:"name"`
 	Type         string             `json:"type"`
+	Required     bool               `json:"required"`
 	Description  string             `json:"description"`
 	AuthServices []string           `json:"authSources"`
 	Items        *ParameterManifest `json:"items,omitempty"`
@@ -428,21 +426,6 @@ func (p *CommonParameter) GetType() string {
 	return p.Type
 }
 
-// Manifest returns the manifest for the Parameter.
-func (p *CommonParameter) Manifest() ParameterManifest {
-	// only list ParamAuthService names (without fields) in manifest
-	authNames := make([]string, len(p.AuthServices))
-	for i, a := range p.AuthServices {
-		authNames[i] = a.Name
-	}
-	return ParameterManifest{
-		Name:         p.Name,
-		Type:         p.Type,
-		Description:  p.Desc,
-		AuthServices: authNames,
-	}
-}
-
 // McpManifest returns the MCP manifest for the Parameter.
 func (p *CommonParameter) McpManifest() ParameterMcpManifest {
 	return ParameterMcpManifest{
@@ -468,7 +451,7 @@ type ParamAuthService struct {
 }
 
 // NewStringParameter is a convenience function for initializing a StringParameter.
-func NewStringParameter(name, desc string) *StringParameter {
+func NewStringParameter(name string, desc string) *StringParameter {
 	return &StringParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -479,8 +462,21 @@ func NewStringParameter(name, desc string) *StringParameter {
 	}
 }
 
+// NewStringParameterWithDefault is a convenience function for initializing a StringParameter with default value.
+func NewStringParameterWithDefault(name string, defaultV, desc string) *StringParameter {
+	return &StringParameter{
+		CommonParameter: CommonParameter{
+			Name:         name,
+			Type:         typeString,
+			Desc:         desc,
+			AuthServices: nil,
+		},
+		Default: &defaultV,
+	}
+}
+
 // NewStringParameterWithAuth is a convenience function for initializing a StringParameter with a list of ParamAuthService.
-func NewStringParameterWithAuth(name, desc string, authServices []ParamAuthService) *StringParameter {
+func NewStringParameterWithAuth(name string, desc string, authServices []ParamAuthService) *StringParameter {
 	return &StringParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -496,6 +492,7 @@ var _ Parameter = &StringParameter{}
 // StringParameter is a parameter representing the "string" type.
 type StringParameter struct {
 	CommonParameter `yaml:",inline"`
+	Default         *string `yaml:"default"`
 }
 
 // Parse casts the value "v" as a "string".
@@ -506,12 +503,37 @@ func (p *StringParameter) Parse(v any) (any, error) {
 	}
 	return newV, nil
 }
+
 func (p *StringParameter) GetAuthServices() []ParamAuthService {
 	return p.AuthServices
 }
 
+func (p *StringParameter) GetDefault() any {
+	if p.Default == nil {
+		return nil
+	}
+	return *p.Default
+}
+
+// Manifest returns the manifest for the StringParameter.
+func (p *StringParameter) Manifest() ParameterManifest {
+	// only list ParamAuthService names (without fields) in manifest
+	authNames := make([]string, len(p.AuthServices))
+	for i, a := range p.AuthServices {
+		authNames[i] = a.Name
+	}
+	required := p.Default == nil
+	return ParameterManifest{
+		Name:         p.Name,
+		Type:         p.Type,
+		Required:     required,
+		Description:  p.Desc,
+		AuthServices: authNames,
+	}
+}
+
 // NewIntParameter is a convenience function for initializing a IntParameter.
-func NewIntParameter(name, desc string) *IntParameter {
+func NewIntParameter(name string, desc string) *IntParameter {
 	return &IntParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -522,8 +544,21 @@ func NewIntParameter(name, desc string) *IntParameter {
 	}
 }
 
+// NewIntParameterWithDefault is a convenience function for initializing a IntParameter with default value.
+func NewIntParameterWithDefault(name string, defaultV int, desc string) *IntParameter {
+	return &IntParameter{
+		CommonParameter: CommonParameter{
+			Name:         name,
+			Type:         typeInt,
+			Desc:         desc,
+			AuthServices: nil,
+		},
+		Default: &defaultV,
+	}
+}
+
 // NewIntParameterWithAuth is a convenience function for initializing a IntParameter with a list of ParamAuthService.
-func NewIntParameterWithAuth(name, desc string, authServices []ParamAuthService) *IntParameter {
+func NewIntParameterWithAuth(name string, desc string, authServices []ParamAuthService) *IntParameter {
 	return &IntParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -539,6 +574,7 @@ var _ Parameter = &IntParameter{}
 // IntParameter is a parameter representing the "int" type.
 type IntParameter struct {
 	CommonParameter `yaml:",inline"`
+	Default         *int `yaml:"default"`
 }
 
 func (p *IntParameter) Parse(v any) (any, error) {
@@ -566,8 +602,32 @@ func (p *IntParameter) GetAuthServices() []ParamAuthService {
 	return p.AuthServices
 }
 
+func (p *IntParameter) GetDefault() any {
+	if p.Default == nil {
+		return nil
+	}
+	return *p.Default
+}
+
+// Manifest returns the manifest for the IntParameter.
+func (p *IntParameter) Manifest() ParameterManifest {
+	// only list ParamAuthService names (without fields) in manifest
+	authNames := make([]string, len(p.AuthServices))
+	for i, a := range p.AuthServices {
+		authNames[i] = a.Name
+	}
+	required := p.Default == nil
+	return ParameterManifest{
+		Name:         p.Name,
+		Type:         p.Type,
+		Required:     required,
+		Description:  p.Desc,
+		AuthServices: authNames,
+	}
+}
+
 // NewFloatParameter is a convenience function for initializing a FloatParameter.
-func NewFloatParameter(name, desc string) *FloatParameter {
+func NewFloatParameter(name string, desc string) *FloatParameter {
 	return &FloatParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -578,8 +638,21 @@ func NewFloatParameter(name, desc string) *FloatParameter {
 	}
 }
 
+// NewFloatParameterWithDefault is a convenience function for initializing a FloatParameter with default value.
+func NewFloatParameterWithDefault(name string, defaultV float64, desc string) *FloatParameter {
+	return &FloatParameter{
+		CommonParameter: CommonParameter{
+			Name:         name,
+			Type:         typeFloat,
+			Desc:         desc,
+			AuthServices: nil,
+		},
+		Default: &defaultV,
+	}
+}
+
 // NewFloatParameterWithAuth is a convenience function for initializing a FloatParameter with a list of ParamAuthService.
-func NewFloatParameterWithAuth(name, desc string, authServices []ParamAuthService) *FloatParameter {
+func NewFloatParameterWithAuth(name string, desc string, authServices []ParamAuthService) *FloatParameter {
 	return &FloatParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -595,6 +668,7 @@ var _ Parameter = &FloatParameter{}
 // FloatParameter is a parameter representing the "float" type.
 type FloatParameter struct {
 	CommonParameter `yaml:",inline"`
+	Default         *float64 `yaml:"default"`
 }
 
 func (p *FloatParameter) Parse(v any) (any, error) {
@@ -620,8 +694,32 @@ func (p *FloatParameter) GetAuthServices() []ParamAuthService {
 	return p.AuthServices
 }
 
+func (p *FloatParameter) GetDefault() any {
+	if p.Default == nil {
+		return nil
+	}
+	return *p.Default
+}
+
+// Manifest returns the manifest for the FloatParameter.
+func (p *FloatParameter) Manifest() ParameterManifest {
+	// only list ParamAuthService names (without fields) in manifest
+	authNames := make([]string, len(p.AuthServices))
+	for i, a := range p.AuthServices {
+		authNames[i] = a.Name
+	}
+	required := p.Default == nil
+	return ParameterManifest{
+		Name:         p.Name,
+		Type:         p.Type,
+		Required:     required,
+		Description:  p.Desc,
+		AuthServices: authNames,
+	}
+}
+
 // NewBooleanParameter is a convenience function for initializing a BooleanParameter.
-func NewBooleanParameter(name, desc string) *BooleanParameter {
+func NewBooleanParameter(name string, desc string) *BooleanParameter {
 	return &BooleanParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -632,8 +730,21 @@ func NewBooleanParameter(name, desc string) *BooleanParameter {
 	}
 }
 
+// NewBooleanParameterWithDefault is a convenience function for initializing a BooleanParameter with default value.
+func NewBooleanParameterWithDefault(name string, defaultV bool, desc string) *BooleanParameter {
+	return &BooleanParameter{
+		CommonParameter: CommonParameter{
+			Name:         name,
+			Type:         typeBool,
+			Desc:         desc,
+			AuthServices: nil,
+		},
+		Default: &defaultV,
+	}
+}
+
 // NewBooleanParameterWithAuth is a convenience function for initializing a BooleanParameter with a list of ParamAuthService.
-func NewBooleanParameterWithAuth(name, desc string, authServices []ParamAuthService) *BooleanParameter {
+func NewBooleanParameterWithAuth(name string, desc string, authServices []ParamAuthService) *BooleanParameter {
 	return &BooleanParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -649,6 +760,7 @@ var _ Parameter = &BooleanParameter{}
 // BooleanParameter is a parameter representing the "boolean" type.
 type BooleanParameter struct {
 	CommonParameter `yaml:",inline"`
+	Default         *bool `yaml:"default"`
 }
 
 func (p *BooleanParameter) Parse(v any) (any, error) {
@@ -663,8 +775,32 @@ func (p *BooleanParameter) GetAuthServices() []ParamAuthService {
 	return p.AuthServices
 }
 
+func (p *BooleanParameter) GetDefault() any {
+	if p.Default == nil {
+		return nil
+	}
+	return *p.Default
+}
+
+// Manifest returns the manifest for the BooleanParameter.
+func (p *BooleanParameter) Manifest() ParameterManifest {
+	// only list ParamAuthService names (without fields) in manifest
+	authNames := make([]string, len(p.AuthServices))
+	for i, a := range p.AuthServices {
+		authNames[i] = a.Name
+	}
+	required := p.Default == nil
+	return ParameterManifest{
+		Name:         p.Name,
+		Type:         p.Type,
+		Required:     required,
+		Description:  p.Desc,
+		AuthServices: authNames,
+	}
+}
+
 // NewArrayParameter is a convenience function for initializing a ArrayParameter.
-func NewArrayParameter(name, desc string, items Parameter) *ArrayParameter {
+func NewArrayParameter(name string, desc string, items Parameter) *ArrayParameter {
 	return &ArrayParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -676,8 +812,22 @@ func NewArrayParameter(name, desc string, items Parameter) *ArrayParameter {
 	}
 }
 
+// NewArrayParameterWithDefault is a convenience function for initializing a ArrayParameter with default value.
+func NewArrayParameterWithDefault(name string, defaultV []any, desc string, items Parameter) *ArrayParameter {
+	return &ArrayParameter{
+		CommonParameter: CommonParameter{
+			Name:         name,
+			Type:         typeArray,
+			Desc:         desc,
+			AuthServices: nil,
+		},
+		Items:   items,
+		Default: &defaultV,
+	}
+}
+
 // NewArrayParameterWithAuth is a convenience function for initializing a ArrayParameter with a list of ParamAuthService.
-func NewArrayParameterWithAuth(name, desc string, items Parameter, authServices []ParamAuthService) *ArrayParameter {
+func NewArrayParameterWithAuth(name string, desc string, items Parameter, authServices []ParamAuthService) *ArrayParameter {
 	return &ArrayParameter{
 		CommonParameter: CommonParameter{
 			Name:         name,
@@ -694,18 +844,21 @@ var _ Parameter = &ArrayParameter{}
 // ArrayParameter is a parameter representing the "array" type.
 type ArrayParameter struct {
 	CommonParameter `yaml:",inline"`
+	Default         *[]any    `yaml:"default"`
 	Items           Parameter `yaml:"items"`
 }
 
 func (p *ArrayParameter) UnmarshalYAML(ctx context.Context, unmarshal func(interface{}) error) error {
 	var rawItem struct {
 		CommonParameter `yaml:",inline"`
+		Default         *[]any                  `yaml:"default"`
 		Items           util.DelayedUnmarshaler `yaml:"items"`
 	}
 	if err := unmarshal(&rawItem); err != nil {
 		return err
 	}
 	p.CommonParameter = rawItem.CommonParameter
+	p.Default = rawItem.Default
 	i, err := parseParamFromDelayedUnmarshaler(ctx, &rawItem.Items)
 	if err != nil {
 		return fmt.Errorf("unable to parse 'items' field: %w", err)
@@ -738,6 +891,13 @@ func (p *ArrayParameter) GetAuthServices() []ParamAuthService {
 	return p.AuthServices
 }
 
+func (p *ArrayParameter) GetDefault() any {
+	if p.Default == nil {
+		return nil
+	}
+	return *p.Default
+}
+
 // Manifest returns the manifest for the ArrayParameter.
 func (p *ArrayParameter) Manifest() ParameterManifest {
 	// only list ParamAuthService names (without fields) in manifest
@@ -746,9 +906,12 @@ func (p *ArrayParameter) Manifest() ParameterManifest {
 		authNames[i] = a.Name
 	}
 	items := p.Items.Manifest()
+	required := p.Default == nil
+	items.Required = required
 	return ParameterManifest{
 		Name:         p.Name,
 		Type:         p.Type,
+		Required:     required,
 		Description:  p.Desc,
 		AuthServices: authNames,
 		Items:        &items,

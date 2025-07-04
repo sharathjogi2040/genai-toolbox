@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package tests
+package couchbase
 
 import (
 	"context"
@@ -34,12 +34,11 @@ const (
 )
 
 var (
-	couchbaseConnection   = os.Getenv("COUCHBASE_CONNECTION")
-	couchbaseBucket       = os.Getenv("COUCHBASE_BUCKET")
-	couchbaseScope        = os.Getenv("COUCHBASE_SCOPE")
-	couchbaseUser         = os.Getenv("COUCHBASE_USER")
-	couchbasePass         = os.Getenv("COUCHBASE_PASS")
-	SERVICE_ACCOUNT_EMAIL = os.Getenv("SERVICE_ACCOUNT_EMAIL")
+	couchbaseConnection = os.Getenv("COUCHBASE_CONNECTION")
+	couchbaseBucket     = os.Getenv("COUCHBASE_BUCKET")
+	couchbaseScope      = os.Getenv("COUCHBASE_SCOPE")
+	couchbaseUser       = os.Getenv("COUCHBASE_USER")
+	couchbasePass       = os.Getenv("COUCHBASE_PASS")
 )
 
 // getCouchbaseVars validates and returns Couchbase configuration variables
@@ -100,6 +99,7 @@ func TestCouchbaseToolEndpoints(t *testing.T) {
 	// Create collection names with UUID
 	collectionNameParam := "param_" + strings.ReplaceAll(uuid.New().String(), "-", "")
 	collectionNameAuth := "auth_" + strings.ReplaceAll(uuid.New().String(), "-", "")
+	collectionNameTemplateParam := "template_param_" + strings.ReplaceAll(uuid.New().String(), "-", "")
 
 	// Set up data for param tool
 	paramToolStatement, params1 := getCouchbaseParamToolInfo(collectionNameParam)
@@ -111,8 +111,14 @@ func TestCouchbaseToolEndpoints(t *testing.T) {
 	teardownCollection2 := setupCouchbaseCollection(t, ctx, cluster, couchbaseBucket, couchbaseScope, collectionNameAuth, params2)
 	defer teardownCollection2(t)
 
+	// Setup up table for template param tool
+	tmplSelectCombined, tmplSelectFilterCombined, tmplSelectAll, params3 := getCouchbaseTemplateParamToolInfo()
+	teardownCollection3 := setupCouchbaseCollection(t, ctx, cluster, couchbaseBucket, couchbaseScope, collectionNameTemplateParam, params3)
+	defer teardownCollection3(t)
+
 	// Write config into a file and pass it to command
 	toolsFile := tests.GetToolsConfig(sourceConfig, couchbaseToolKind, paramToolStatement, authToolStatement)
+	toolsFile = tests.AddTemplateParamConfig(t, toolsFile, couchbaseToolKind, tmplSelectCombined, tmplSelectFilterCombined, tmplSelectAll)
 
 	cmd, cleanup, err := tests.StartCmd(ctx, toolsFile, args...)
 	if err != nil {
@@ -136,6 +142,14 @@ func TestCouchbaseToolEndpoints(t *testing.T) {
 	invokeParamWant, mcpInvokeParamWant := tests.GetNonSpannerInvokeParamWant()
 	tests.RunToolInvokeTest(t, select1Want, invokeParamWant)
 	tests.RunMCPToolCallMethod(t, mcpInvokeParamWant, failMcpInvocationWant)
+
+	templateParamTestConfig := tests.NewTemplateParameterTestConfig(
+		tests.WithIgnoreDdl(),
+		tests.WithIgnoreInsert(),
+		tests.WithSelect1Want("[{\"age\":21,\"id\":1,\"name\":\"Alex\"}]"),
+		tests.WithSelectAllWant("[{\"age\":21,\"id\":1,\"name\":\"Alex\"},{\"age\":100,\"id\":2,\"name\":\"Alice\"}]"),
+	)
+	tests.RunToolInvokeWithTemplateParameters(t, collectionNameTemplateParam, templateParamTestConfig)
 }
 
 // setupCouchbaseCollection creates a scope and collection and inserts test data
@@ -235,8 +249,20 @@ func getCouchbaseAuthToolInfo(collectionName string) (string, []map[string]any) 
 	toolStatement := fmt.Sprintf("SELECT name FROM %s WHERE email = $email", collectionName)
 
 	params := []map[string]any{
-		{"name": "Alice", "email": SERVICE_ACCOUNT_EMAIL},
+		{"name": "Alice", "email": tests.ServiceAccountEmail},
 		{"name": "Jane", "email": "janedoe@gmail.com"},
 	}
 	return toolStatement, params
+}
+
+func getCouchbaseTemplateParamToolInfo() (string, string, string, []map[string]any) {
+	tmplSelectCombined := "SELECT {{.tableName}}.* FROM {{.tableName}} WHERE id = $id"
+	tmplSelectFilterCombined := "SELECT {{.tableName}}.* FROM {{.tableName}} WHERE {{.columnFilter}} = $name"
+	tmplSelectAll := "SELECT {{.tableName}}.* FROM {{.tableName}}"
+
+	params := []map[string]any{
+		{"name": "Alex", "id": 1, "age": 21},
+		{"name": "Alice", "id": 2, "age": 100},
+	}
+	return tmplSelectCombined, tmplSelectFilterCombined, tmplSelectAll, params
 }

@@ -21,7 +21,9 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -35,26 +37,28 @@ import (
 
 	// Import tool packages for side effect of registration
 	_ "github.com/googleapis/genai-toolbox/internal/tools/alloydbainl"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquery"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/bigqueryexecutesql"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquerygetdatasetinfo"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquerygettableinfo"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquerylistdatasetids"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquerylisttableids"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquery/bigqueryexecutesql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquery/bigquerygetdatasetinfo"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquery/bigquerygettableinfo"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquery/bigquerylistdatasetids"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquery/bigquerylisttableids"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/bigquery/bigquerysql"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/bigtable"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/couchbase"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/dgraph"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/http"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/mssqlexecutesql"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/mssqlsql"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/mysqlexecutesql"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/mysqlsql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/mssql/mssqlexecutesql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/mssql/mssqlsql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/mysql/mysqlexecutesql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/mysql/mysqlsql"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/neo4j"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/postgresexecutesql"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/postgressql"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/spanner"
-	_ "github.com/googleapis/genai-toolbox/internal/tools/spannerexecutesql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/postgres/postgresexecutesql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/postgres/postgressql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/redis"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/spanner/spannerexecutesql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/spanner/spannersql"
 	_ "github.com/googleapis/genai-toolbox/internal/tools/sqlitesql"
+	_ "github.com/googleapis/genai-toolbox/internal/tools/valkey"
 
 	"github.com/spf13/cobra"
 
@@ -71,16 +75,22 @@ import (
 	_ "github.com/googleapis/genai-toolbox/internal/sources/mysql"
 	_ "github.com/googleapis/genai-toolbox/internal/sources/neo4j"
 	_ "github.com/googleapis/genai-toolbox/internal/sources/postgres"
+	_ "github.com/googleapis/genai-toolbox/internal/sources/redis"
 	_ "github.com/googleapis/genai-toolbox/internal/sources/spanner"
 	_ "github.com/googleapis/genai-toolbox/internal/sources/sqlite"
+	_ "github.com/googleapis/genai-toolbox/internal/sources/valkey"
 )
 
 var (
-	// versionString indicates the version of this library.
-	//go:embed version.txt
+	// versionString stores the full semantic version, including build metadata.
 	versionString string
+	// versionNum indicates the numerical part fo the version
+	//go:embed version.txt
+	versionNum string
 	// metadataString indicates additional build or distribution metadata.
-	metadataString string
+	buildType string = "dev" // should be one of "dev", "binary", or "container"
+	// commitSha is the git commit it was built from
+	commitSha string
 )
 
 func init() {
@@ -89,10 +99,11 @@ func init() {
 
 // semanticVersion returns the version of the CLI including a compile-time metadata.
 func semanticVersion() string {
-	v := strings.TrimSpace(versionString)
-	if metadataString != "" {
-		v += "+" + metadataString
+	metadataStrings := []string{buildType, runtime.GOOS, runtime.GOARCH}
+	if commitSha != "" {
+		metadataStrings = append(metadataStrings, commitSha)
 	}
+	v := strings.TrimSpace(versionNum) + "+" + strings.Join(metadataStrings, ".")
 	return v
 }
 
@@ -112,6 +123,8 @@ type Command struct {
 	cfg            server.ServerConfig
 	logger         log.Logger
 	tools_file     string
+	tools_files    []string
+	tools_folder   string
 	prebuiltConfig string
 	inStream       io.Reader
 	outStream      io.Writer
@@ -155,7 +168,9 @@ func NewCommand(opts ...Option) *Command {
 	flags.StringVar(&cmd.tools_file, "tools_file", "", "File path specifying the tool configuration. Cannot be used with --prebuilt.")
 	// deprecate tools_file
 	_ = flags.MarkDeprecated("tools_file", "please use --tools-file instead")
-	flags.StringVar(&cmd.tools_file, "tools-file", "", "File path specifying the tool configuration. Cannot be used with --prebuilt.")
+	flags.StringVar(&cmd.tools_file, "tools-file", "", "File path specifying the tool configuration. Cannot be used with --prebuilt, --tools-files, or --tools-folder.")
+	flags.StringSliceVar(&cmd.tools_files, "tools-files", []string{}, "Multiple file paths specifying tool configurations. Files will be merged. Cannot be used with --prebuilt, --tools-file, or --tools-folder.")
+	flags.StringVar(&cmd.tools_folder, "tools-folder", "", "Directory path containing YAML tool configuration files. All .yaml and .yml files in the directory will be loaded and merged. Cannot be used with --prebuilt, --tools-file, or --tools-files.")
 	flags.Var(&cmd.cfg.LogLevel, "log-level", "Specify the minimum level logged. Allowed: 'DEBUG', 'INFO', 'WARN', 'ERROR'.")
 	flags.Var(&cmd.cfg.LoggingFormat, "logging-format", "Specify logging format to use. Allowed: 'standard' or 'JSON'.")
 	flags.BoolVar(&cmd.cfg.TelemetryGCP, "telemetry-gcp", false, "Enable exporting directly to Google Cloud Monitoring.")
@@ -209,6 +224,136 @@ func parseToolsFile(ctx context.Context, raw []byte) (ToolsFile, error) {
 		return toolsFile, err
 	}
 	return toolsFile, nil
+}
+
+// mergeToolsFiles merges multiple ToolsFile structs into one.
+// Detects and raises errors for resource conflicts in sources, authServices, tools, and toolsets.
+// All resource names (sources, authServices, tools, toolsets) must be unique across all files.
+func mergeToolsFiles(files ...ToolsFile) (ToolsFile, error) {
+	merged := ToolsFile{
+		Sources:      make(server.SourceConfigs),
+		AuthServices: make(server.AuthServiceConfigs),
+		Tools:        make(server.ToolConfigs),
+		Toolsets:     make(server.ToolsetConfigs),
+	}
+
+	var conflicts []string
+
+	for fileIndex, file := range files {
+		// Check for conflicts and merge sources
+		for name, source := range file.Sources {
+			if _, exists := merged.Sources[name]; exists {
+				conflicts = append(conflicts, fmt.Sprintf("source '%s' (file #%d)", name, fileIndex+1))
+			} else {
+				merged.Sources[name] = source
+			}
+		}
+
+		// Check for conflicts and merge authSources (deprecated, but still support)
+		for name, authSource := range file.AuthSources {
+			if _, exists := merged.AuthSources[name]; exists {
+				conflicts = append(conflicts, fmt.Sprintf("authSource '%s' (file #%d)", name, fileIndex+1))
+			} else {
+				merged.AuthSources[name] = authSource
+			}
+		}
+
+		// Check for conflicts and merge authServices
+		for name, authService := range file.AuthServices {
+			if _, exists := merged.AuthServices[name]; exists {
+				conflicts = append(conflicts, fmt.Sprintf("authService '%s' (file #%d)", name, fileIndex+1))
+			} else {
+				merged.AuthServices[name] = authService
+			}
+		}
+
+		// Check for conflicts and merge tools
+		for name, tool := range file.Tools {
+			if _, exists := merged.Tools[name]; exists {
+				conflicts = append(conflicts, fmt.Sprintf("tool '%s' (file #%d)", name, fileIndex+1))
+			} else {
+				merged.Tools[name] = tool
+			}
+		}
+
+		// Check for conflicts and merge toolsets
+		for name, toolset := range file.Toolsets {
+			if _, exists := merged.Toolsets[name]; exists {
+				conflicts = append(conflicts, fmt.Sprintf("toolset '%s' (file #%d)", name, fileIndex+1))
+			} else {
+				merged.Toolsets[name] = toolset
+			}
+		}
+	}
+
+	// If conflicts were detected, return an error
+	if len(conflicts) > 0 {
+		return ToolsFile{}, fmt.Errorf("resource conflicts detected:\n  - %s\n\nPlease ensure each source, authService, tool, and toolset has a unique name across all files", strings.Join(conflicts, "\n  - "))
+	}
+
+	return merged, nil
+}
+
+// loadAndMergeToolsFiles loads multiple YAML files and merges them
+func loadAndMergeToolsFiles(ctx context.Context, filePaths []string) (ToolsFile, error) {
+	var toolsFiles []ToolsFile
+
+	for _, filePath := range filePaths {
+		buf, err := os.ReadFile(filePath)
+		if err != nil {
+			return ToolsFile{}, fmt.Errorf("unable to read tool file at %q: %w", filePath, err)
+		}
+
+		toolsFile, err := parseToolsFile(ctx, buf)
+		if err != nil {
+			return ToolsFile{}, fmt.Errorf("unable to parse tool file at %q: %w", filePath, err)
+		}
+
+		toolsFiles = append(toolsFiles, toolsFile)
+	}
+
+	mergedFile, err := mergeToolsFiles(toolsFiles...)
+	if err != nil {
+		return ToolsFile{}, fmt.Errorf("unable to merge tools files: %w", err)
+	}
+
+	return mergedFile, nil
+}
+
+// loadAndMergeToolsFolder loads all YAML files from a directory and merges them
+func loadAndMergeToolsFolder(ctx context.Context, folderPath string) (ToolsFile, error) {
+	// Check if directory exists
+	info, err := os.Stat(folderPath)
+	if err != nil {
+		return ToolsFile{}, fmt.Errorf("unable to access tools folder at %q: %w", folderPath, err)
+	}
+	if !info.IsDir() {
+		return ToolsFile{}, fmt.Errorf("path %q is not a directory", folderPath)
+	}
+
+	// Find all YAML files in the directory
+	pattern := filepath.Join(folderPath, "*.yaml")
+	yamlFiles, err := filepath.Glob(pattern)
+	if err != nil {
+		return ToolsFile{}, fmt.Errorf("error finding YAML files in %q: %w", folderPath, err)
+	}
+
+	// Also find .yml files
+	ymlPattern := filepath.Join(folderPath, "*.yml")
+	ymlFiles, err := filepath.Glob(ymlPattern)
+	if err != nil {
+		return ToolsFile{}, fmt.Errorf("error finding YML files in %q: %w", folderPath, err)
+	}
+
+	// Combine both file lists
+	allFiles := append(yamlFiles, ymlFiles...)
+	
+	if len(allFiles) == 0 {
+		return ToolsFile{}, fmt.Errorf("no YAML files found in directory %q", folderPath)
+	}
+
+	// Use existing loadAndMergeToolsFiles function
+	return loadAndMergeToolsFiles(ctx, allFiles)
 }
 
 // updateLogLevel checks if Toolbox have to update the existing log level set by users.
@@ -274,7 +419,7 @@ func run(cmd *Command) error {
 	ctx = util.WithLogger(ctx, cmd.logger)
 
 	// Set up OpenTelemetry
-	otelShutdown, err := telemetry.SetupOTel(ctx, cmd.Version, cmd.cfg.TelemetryOTLP, cmd.cfg.TelemetryGCP, cmd.cfg.TelemetryServiceName)
+	otelShutdown, err := telemetry.SetupOTel(ctx, cmd.cfg.Version, cmd.cfg.TelemetryOTLP, cmd.cfg.TelemetryGCP, cmd.cfg.TelemetryServiceName)
 	if err != nil {
 		errMsg := fmt.Errorf("error setting up OpenTelemetry: %w", err)
 		cmd.logger.ErrorContext(ctx, errMsg.Error())
@@ -288,48 +433,88 @@ func run(cmd *Command) error {
 		}
 	}()
 
-	var buf []byte
+	var toolsFile ToolsFile
 
 	if cmd.prebuiltConfig != "" {
-		// Make sure --prebuilt and --tools-file flags are mutually exclusive
-		if cmd.tools_file != "" {
-			errMsg := fmt.Errorf("--prebuilt and --tools-file flags cannot be used simultaneously")
+		// Make sure --prebuilt and --tools-file/--tools-files/--tools-folder flags are mutually exclusive
+		if cmd.tools_file != "" || len(cmd.tools_files) > 0 || cmd.tools_folder != "" {
+			errMsg := fmt.Errorf("--prebuilt and --tools-file/--tools-files/--tools-folder flags cannot be used simultaneously")
 			cmd.logger.ErrorContext(ctx, errMsg.Error())
 			return errMsg
 		}
 		// Use prebuilt tools
-		buf, err = prebuiltconfigs.Get(cmd.prebuiltConfig)
+		buf, err := prebuiltconfigs.Get(cmd.prebuiltConfig)
 		if err != nil {
 			cmd.logger.ErrorContext(ctx, err.Error())
 			return err
 		}
 		logMsg := fmt.Sprint("Using prebuilt tool configuration for ", cmd.prebuiltConfig)
 		cmd.logger.InfoContext(ctx, logMsg)
+		// Append prebuilt.source to Version string for the User Agent
+		cmd.cfg.Version += "+prebuilt." + cmd.prebuiltConfig
+
+		toolsFile, err = parseToolsFile(ctx, buf)
+		if err != nil {
+			errMsg := fmt.Errorf("unable to parse prebuilt tool configuration: %w", err)
+			cmd.logger.ErrorContext(ctx, errMsg.Error())
+			return errMsg
+		}
+	} else if len(cmd.tools_files) > 0 {
+		// Make sure --tools-file, --tools-files, and --tools-folder flags are mutually exclusive
+		if cmd.tools_file != "" || cmd.tools_folder != "" {
+			errMsg := fmt.Errorf("--tools-file, --tools-files, and --tools-folder flags cannot be used simultaneously")
+			cmd.logger.ErrorContext(ctx, errMsg.Error())
+			return errMsg
+		}
+		// Use multiple tools files
+		cmd.logger.InfoContext(ctx, fmt.Sprintf("Loading and merging %d tool configuration files", len(cmd.tools_files)))
+		var err error
+		toolsFile, err = loadAndMergeToolsFiles(ctx, cmd.tools_files)
+		if err != nil {
+			cmd.logger.ErrorContext(ctx, err.Error())
+			return err
+		}
+	} else if cmd.tools_folder != "" {
+		// Make sure --tools-folder and other flags are mutually exclusive
+		if cmd.tools_file != "" || len(cmd.tools_files) > 0 {
+			errMsg := fmt.Errorf("--tools-file, --tools-files, and --tools-folder flags cannot be used simultaneously")
+			cmd.logger.ErrorContext(ctx, errMsg.Error())
+			return errMsg
+		}
+		// Use tools folder
+		cmd.logger.InfoContext(ctx, fmt.Sprintf("Loading and merging all YAML files from directory: %s", cmd.tools_folder))
+		var err error
+		toolsFile, err = loadAndMergeToolsFolder(ctx, cmd.tools_folder)
+		if err != nil {
+			cmd.logger.ErrorContext(ctx, err.Error())
+			return err
+		}
 	} else {
 		// Set default value of tools-file flag to tools.yaml
 		if cmd.tools_file == "" {
 			cmd.tools_file = "tools.yaml"
 		}
-		// Read tool file contents
-		buf, err = os.ReadFile(cmd.tools_file)
+		// Read single tool file contents
+		buf, err := os.ReadFile(cmd.tools_file)
 		if err != nil {
 			errMsg := fmt.Errorf("unable to read tool file at %q: %w", cmd.tools_file, err)
 			cmd.logger.ErrorContext(ctx, errMsg.Error())
 			return errMsg
 		}
+
+		toolsFile, err = parseToolsFile(ctx, buf)
+		if err != nil {
+			errMsg := fmt.Errorf("unable to parse tool file at %q: %w", cmd.tools_file, err)
+			cmd.logger.ErrorContext(ctx, errMsg.Error())
+			return errMsg
+		}
 	}
 
-	toolsFile, err := parseToolsFile(ctx, buf)
 	cmd.cfg.SourceConfigs, cmd.cfg.AuthServiceConfigs, cmd.cfg.ToolConfigs, cmd.cfg.ToolsetConfigs = toolsFile.Sources, toolsFile.AuthServices, toolsFile.Tools, toolsFile.Toolsets
 	authSourceConfigs := toolsFile.AuthSources
 	if authSourceConfigs != nil {
 		cmd.logger.WarnContext(ctx, "`authSources` is deprecated, use `authServices` instead")
 		cmd.cfg.AuthServiceConfigs = authSourceConfigs
-	}
-	if err != nil {
-		errMsg := fmt.Errorf("unable to parse tool file at %q: %w", cmd.tools_file, err)
-		cmd.logger.ErrorContext(ctx, errMsg.Error())
-		return errMsg
 	}
 
 	// start server
@@ -340,30 +525,33 @@ func run(cmd *Command) error {
 		return errMsg
 	}
 
-	err = s.Listen(ctx)
-	if err != nil {
-		errMsg := fmt.Errorf("toolbox failed to start listener: %w", err)
-		cmd.logger.ErrorContext(ctx, errMsg.Error())
-		return errMsg
-	}
-	cmd.logger.InfoContext(ctx, "Server ready to serve!")
-
 	// run server in background
 	srvErr := make(chan error)
-	go func() {
-		defer close(srvErr)
-		if cmd.cfg.Stdio {
+	if cmd.cfg.Stdio {
+		go func() {
+			defer close(srvErr)
 			err = s.ServeStdio(ctx, cmd.inStream, cmd.outStream)
 			if err != nil {
 				srvErr <- err
 			}
-		} else {
+		}()
+	} else {
+		err = s.Listen(ctx)
+		if err != nil {
+			errMsg := fmt.Errorf("toolbox failed to start listener: %w", err)
+			cmd.logger.ErrorContext(ctx, errMsg.Error())
+			return errMsg
+		}
+		cmd.logger.InfoContext(ctx, "Server ready to serve!")
+
+		go func() {
+			defer close(srvErr)
 			err = s.Serve(ctx)
 			if err != nil {
 				srvErr <- err
 			}
-		}
-	}()
+		}()
+	}
 
 	// wait for either the server to error out or the command's context to be canceled
 	select {

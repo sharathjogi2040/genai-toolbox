@@ -16,7 +16,6 @@ such as connection pooling, authentication, and more.
 This README provides a brief overview. For comprehensive details, see the [full
 documentation](https://googleapis.github.io/genai-toolbox/).
 
-
 > [!NOTE]
 > This solution was originally named “Gen AI Toolbox for Databases” as
 > its initial development predated MCP, but was renamed to align with recently
@@ -30,23 +29,23 @@ documentation](https://googleapis.github.io/genai-toolbox/).
 - [Why Toolbox?](#why-toolbox)
 - [General Architecture](#general-architecture)
 - [Getting Started](#getting-started)
-    - [Installing the server](#installing-the-server)
-    - [Running the server](#running-the-server)
-    - [Integrating your application](#integrating-your-application)
+  - [Installing the server](#installing-the-server)
+  - [Running the server](#running-the-server)
+  - [Integrating your application](#integrating-your-application)
 - [Configuration](#configuration)
-    - [Sources](#sources)
-    - [Tools](#tools)
-    - [Toolsets](#toolsets)
+  - [Sources](#sources)
+  - [Tools](#tools)
+  - [Toolsets](#toolsets)
 - [Versioning](#versioning)
 - [Contributing](#contributing)
 
 <!-- /TOC -->
 
-
-##  Why Toolbox?
+## Why Toolbox?
 
 Toolbox helps you build Gen AI tools that let your agents access data in your
 database. Toolbox provides:
+
 - **Simplified development**: Integrate tools to your agent in less than 10
   lines of code, reuse tools between multiple agents or frameworks, and deploy
   new versions of tools more easily.
@@ -56,17 +55,29 @@ database. Toolbox provides:
 - **End-to-end observability**: Out of the box metrics and tracing with built-in
   support for OpenTelemetry.
 
-
 **⚡ Supercharge Your Workflow with an AI Database Assistant ⚡**
 
-Stop context-switching and let your AI assistant become a true co-developer. By [connecting your IDE to your databases with MCP Toolbox][connect-ide], you can delegate complex and time-consuming database tasks, allowing you to build faster and focus on what matters. This isn't just about code completion; it's about giving your AI the context it needs to handle the entire development lifecycle.
+Stop context-switching and let your AI assistant become a true co-developer. By
+[connecting your IDE to your databases with MCP Toolbox][connect-ide], you can
+delegate complex and time-consuming database tasks, allowing you to build faster
+and focus on what matters. This isn't just about code completion; it's about
+giving your AI the context it needs to handle the entire development lifecycle.
 
 Here’s how it will save you time:
 
-* **Query in Plain English**: Interact with your data using natural language right from your IDE. Ask complex questions like, *"How many orders were delivered in 2024, and what items were in them?"* without writing any SQL.
-* **Automate Database Management**: Simply describe your data needs, and let the AI assistant manage your database for you. It can handle generating queries, creating tables, adding indexes, and more.
-* **Generate Context-Aware Code**: Empower your AI assistant to generate application code and tests with a deep understanding of your real-time database schema.  This accelerates the development cycle by ensuring the generated code is directly usable.
-* **Slash Development Overhead**: Radically reduce the time spent on manual setup and boilerplate. MCP Toolbox helps streamline lengthy database configurations, repetitive code, and error-prone schema migrations.
+- **Query in Plain English**: Interact with your data using natural language
+  right from your IDE. Ask complex questions like, *"How many orders were
+  delivered in 2024, and what items were in them?"* without writing any SQL.
+- **Automate Database Management**: Simply describe your data needs, and let the
+  AI assistant manage your database for you. It can handle generating queries,
+  creating tables, adding indexes, and more.
+- **Generate Context-Aware Code**: Empower your AI assistant to generate
+  application code and tests with a deep understanding of your real-time
+  database schema.  This accelerates the development cycle by ensuring the
+  generated code is directly usable.
+- **Slash Development Overhead**: Radically reduce the time spent on manual
+  setup and boilerplate. MCP Toolbox helps streamline lengthy database
+  configurations, repetitive code, and error-prone schema migrations.
 
 Learn [how to connect your AI tools (IDEs) to Toolbox using MCP][connect-ide].
 
@@ -86,6 +97,7 @@ redeploying your application.
 ## Getting Started
 
 ### Installing the server
+
 For the latest version, check the [releases page][releases] and use the
 following instructions for your OS and CPU architecture.
 
@@ -99,7 +111,7 @@ To install Toolbox as a binary:
 <!-- {x-release-please-start-version} -->
 ```sh
 # see releases page for other versions
-export VERSION=0.6.0
+export VERSION=0.8.0
 curl -O https://storage.googleapis.com/genai-toolbox/v$VERSION/linux/amd64/toolbox
 chmod +x toolbox
 ```
@@ -112,7 +124,7 @@ You can also install Toolbox as a container:
 
 ```sh
 # see releases page for other versions
-export VERSION=0.6.0
+export VERSION=0.8.0
 docker pull us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:$VERSION
 ```
 
@@ -125,7 +137,7 @@ To install from source, ensure you have the latest version of
 [Go installed](https://go.dev/doc/install), and then run the following command:
 
 ```sh
-go install github.com/googleapis/genai-toolbox@v0.6.0
+go install github.com/googleapis/genai-toolbox@v0.8.0
 ```
 <!-- {x-release-please-end} -->
 
@@ -153,13 +165,21 @@ Once your server is up and running, you can load the tools into your
 application. See below the list of Client SDKs for using various frameworks:
 
 <details open>
-<summary>Core</summary>
+  <summary>Python</summary>
+  <br>
+  <blockquote>
+
+  <details open>
+    <summary>Core</summary>
 
 1. Install [Toolbox Core SDK][toolbox-core]:
+
     ```bash
     pip install toolbox-core
     ```
+
 1. Load tools:
+
     ```python
     from toolbox_core import ToolboxClient
 
@@ -176,15 +196,18 @@ For more detailed instructions on using the Toolbox Core SDK, see the
 [toolbox-core]: https://pypi.org/project/toolbox-core/
 [toolbox-core-readme]: https://github.com/googleapis/mcp-toolbox-sdk-python/tree/main/packages/toolbox-core/README.md
 
-</details>
-<details>
-<summary>LangChain / LangGraph</summary>
+  </details>
+  <details>
+    <summary>LangChain / LangGraph</summary>
 
 1. Install [Toolbox LangChain SDK][toolbox-langchain]:
+
     ```bash
     pip install toolbox-langchain
     ```
+
 1. Load tools:
+
     ```python
     from toolbox_langchain import ToolboxClient
 
@@ -195,22 +218,24 @@ For more detailed instructions on using the Toolbox Core SDK, see the
         tools = client.load_toolset()
     ```
 
-For more detailed instructions on using the Toolbox LangChain SDK, see the
-[project's README][toolbox-langchain-readme].
+    For more detailed instructions on using the Toolbox LangChain SDK, see the
+    [project's README][toolbox-langchain-readme].
 
-[toolbox-langchain]: https://pypi.org/project/toolbox-langchain/
-[toolbox-langchain-readme]: https://github.com/googleapis/mcp-toolbox-sdk-python/blob/main/packages/toolbox-langchain/README.md
+    [toolbox-langchain]: https://pypi.org/project/toolbox-langchain/
+    [toolbox-langchain-readme]: https://github.com/googleapis/mcp-toolbox-sdk-python/blob/main/packages/toolbox-langchain/README.md
 
-</details>
-
-<details>
-<summary>LlamaIndex</summary>
+  </details>
+  <details>
+    <summary>LlamaIndex</summary>
 
 1. Install [Toolbox Llamaindex SDK][toolbox-llamaindex]:
+
     ```bash
     pip install toolbox-llamaindex
     ```
+
 1. Load tools:
+
     ```python
     from toolbox_llamaindex import ToolboxClient
 
@@ -221,12 +246,129 @@ For more detailed instructions on using the Toolbox LangChain SDK, see the
         tools = client.load_toolset()
     ```
 
-For more detailed instructions on using the Toolbox Llamaindex SDK, see the
-[project's README][toolbox-llamaindex-readme].
+    For more detailed instructions on using the Toolbox Llamaindex SDK, see the
+    [project's README][toolbox-llamaindex-readme].
 
-[toolbox-llamaindex]: https://pypi.org/project/toolbox-llamaindex/
-[toolbox-llamaindex-readme]: https://github.com/googleapis/genai-toolbox-llamaindex-python/blob/main/README.md
+    [toolbox-llamaindex]: https://pypi.org/project/toolbox-llamaindex/
+    [toolbox-llamaindex-readme]: https://github.com/googleapis/genai-toolbox-llamaindex-python/blob/main/README.md
 
+  </details>
+</details>
+</blockquote>
+<details>
+  <summary>Javascript/Typescript</summary>
+  <br>
+  <blockquote>
+
+  <details open>
+    <summary>Core</summary>
+
+1. Install [Toolbox Core SDK][toolbox-core-js]:
+
+    ```bash
+    npm install @toolbox-sdk/core
+    ```
+
+1. Load tools:
+
+    ```javascript
+    import { ToolboxClient } from '@toolbox-sdk/core';
+
+    // update the url to point to your server
+    const URL = 'http://127.0.0.1:5000';
+    let client = new ToolboxClient(URL);
+
+    // these tools can be passed to your application!
+    const tools = await client.loadToolset('toolsetName');
+    ```
+
+    For more detailed instructions on using the Toolbox Core SDK, see the
+    [project's README][toolbox-core-js-readme].
+
+    [toolbox-core-js]: https://www.npmjs.com/package/@toolbox-sdk/core
+    [toolbox-core-js-readme]: https://github.com/googleapis/mcp-toolbox-sdk-js/blob/main/packages/toolbox-core/README.md
+
+  </details>
+  <details>
+    <summary>LangChain / LangGraph</summary>
+
+1. Install [Toolbox Core SDK][toolbox-core-js]:
+
+    ```bash
+    npm install @toolbox-sdk/core
+    ```
+
+2. Load tools:
+
+    ```javascript
+    import { ToolboxClient } from '@toolbox-sdk/core';
+
+    // update the url to point to your server
+    const URL = 'http://127.0.0.1:5000';
+    let client = new ToolboxClient(URL);
+
+    // these tools can be passed to your application!
+    const toolboxTools = await client.loadToolset('toolsetName');
+
+    // Define the basics of the tool: name, description, schema and core logic
+    const getTool = (toolboxTool) => tool(currTool, {
+        name: toolboxTool.getName(),
+        description: toolboxTool.getDescription(),
+        schema: toolboxTool.getParamSchema()
+    });
+
+    // Use these tools in your Langchain/Langraph applications
+    const tools = toolboxTools.map(getTool);
+    ```
+
+  </details>
+  <details>
+    <summary>Genkit</summary>
+
+1. Install [Toolbox Core SDK][toolbox-core-js]:
+
+    ```bash
+    npm install @toolbox-sdk/core
+    ```
+
+2. Load tools:
+
+    ```javascript
+    import { ToolboxClient } from '@toolbox-sdk/core';
+    import { genkit } from 'genkit';
+
+    // Initialise genkit
+    const ai = genkit({
+        plugins: [
+            googleAI({
+                apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+            })
+        ],
+        model: googleAI.model('gemini-2.0-flash'),
+    });
+
+    // update the url to point to your server
+    const URL = 'http://127.0.0.1:5000';
+    let client = new ToolboxClient(URL);
+
+    // these tools can be passed to your application!
+    const toolboxTools = await client.loadToolset('toolsetName');
+
+    // Define the basics of the tool: name, description, schema and core logic
+    const getTool = (toolboxTool) => ai.defineTool({
+        name: toolboxTool.getName(),
+        description: toolboxTool.getDescription(),
+        schema: toolboxTool.getParamSchema()
+    }, toolboxTool)
+
+    // Use these tools in your Genkit applications
+    const tools = toolboxTools.map(getTool);
+    ```
+
+  </details>
+</details>
+</blockquote>
+  
 </details>
 
 ## Configuration
@@ -237,6 +379,7 @@ tools.yaml` flag.
 
 You can find more detailed reference documentation to all resource types in the
 [Resources](https://googleapis.github.io/genai-toolbox/resources/).
+
 ### Sources
 
 The `sources` section of your `tools.yaml` defines what data sources your
@@ -277,7 +420,6 @@ tools:
 
 For more details on configuring different types of tools, see the
 [Tools](https://googleapis.github.io/genai-toolbox/resources/tools).
-
 
 ### Toolsets
 
